@@ -1,6 +1,7 @@
 # app.py
 # =============================================================================
 # Streamlit App: Hybrid Movie Recommendation System (MovieLens 25M)
+# Uses pre-trained models stored in ./models
 # =============================================================================
 
 import streamlit as st
@@ -22,9 +23,8 @@ st.set_page_config(
     layout="wide",
 )
 
-# Path where trained models and artifacts are stored
+# Folder that contains the trained models and artifacts
 ARTIFACT_DIR = "./models"
-
 
 # -----------------------------------------------------------------------------
 # LOAD ARTIFACTS
@@ -32,14 +32,19 @@ ARTIFACT_DIR = "./models"
 
 @st.cache_resource(show_spinner=True)
 def load_artifacts():
-    # Detect latest timestamped files (simple heuristic)
     files = os.listdir(ARTIFACT_DIR)
-    tfidf_file = sorted([f for f in files if "tfidf_vectorizer" in f])[-1]
-    user_factors_file = sorted([f for f in files if "user_factors" in f])[-1]
-    movie_factors_file = sorted([f for f in files if "movie_factors" in f])[-1]
-    mappings_file = sorted([f for f in files if "index_mappings" in f])[-1]
-    movies_meta_file = sorted([f for f in files if "movies_metadata" in f])[-1]
-    stats_file = sorted([f for f in files if "model_stats" in f and f.endswith(".json")])[-1]
+
+    # Detect correct files based on prefix (works مع الأسامي
+    # index_mappings_20260107_185445.json, ... إلخ)
+    tfidf_file = sorted([f for f in files if "tfidf_vectorizer" in f])[0]
+    user_factors_file = sorted([f for f in files if "user_factors" in f])[0]
+    movie_factors_file = sorted([f for f in files if "movie_factors" in f])[0]
+    mappings_file = sorted([f for f in files if "index_mappings" in f])[0]
+    movies_meta_file = sorted([f for f in files if "movies_metadata" in f])[0]
+
+    # model_stats قد لا يكون موجود
+    stats_files = sorted([f for f in files if "model_stats" in f and f.endswith(".json")])
+    has_stats = len(stats_files) > 0
 
     tfidf_vectorizer = joblib.load(os.path.join(ARTIFACT_DIR, tfidf_file))
     user_factors = joblib.load(os.path.join(ARTIFACT_DIR, user_factors_file))
@@ -49,14 +54,25 @@ def load_artifacts():
         mappings = json.load(f)
     movies_df = pd.read_csv(os.path.join(ARTIFACT_DIR, movies_meta_file))
 
-    with open(os.path.join(ARTIFACT_DIR, stats_file), "r") as f:
-        stats = json.load(f)
+    if has_stats:
+        with open(os.path.join(ARTIFACT_DIR, stats_files[0]), "r") as f:
+            stats = json.load(f)
+    else:
+        # Fallback stats if not saved from training
+        stats = {
+            "n_users_total": len(mappings["user_id_map_sampled"]),
+            "n_movies_total": len(mappings["movie_idx_to_id_sampled"]),
+            "n_ratings_total": 0,
+            "cf_mae_sample": 0.0,
+            "cf_rmse_sample": 0.0,
+            "precision_at_k": None,
+            "recall_at_k": None,
+            "k_eval": 10,
+        }
 
-    # Convert back mapping keys to proper types
+    # Convert mappings back to proper types
     user_id_map_sampled = {int(k): int(v) for k, v in mappings["user_id_map_sampled"].items()}
     movie_idx_to_id_sampled = {int(k): int(v) for k, v in mappings["movie_idx_to_id_sampled"].items()}
-
-    # Build inverse mapping for movies (movieId -> movie_idx)
     movie_id_to_idx_sampled = {v: k for k, v in movie_idx_to_id_sampled.items()}
 
     return (
@@ -81,7 +97,10 @@ def load_artifacts():
     stats,
 ) = load_artifacts()
 
-# Precompute TF-IDF matrix for all movies (from movies_df titles + genres)
+# -----------------------------------------------------------------------------
+# BUILD TF-IDF MATRIX FROM SAVED VECTORIZER + MOVIES METADATA
+# -----------------------------------------------------------------------------
+
 @st.cache_resource(show_spinner=True)
 def build_tfidf_matrix(movies_df, tfidf_vectorizer):
     combined = (
@@ -122,7 +141,6 @@ def get_cf_recommendations(user_id: int, top_n: int = 10) -> pd.DataFrame:
     user_idx = user_id_map_sampled[user_id]
     user_pred = user_factors[user_idx].dot(movie_factors.T)
 
-    # Sort by predicted rating
     sorted_idx = np.argsort(user_pred)[::-1][:top_n]
     movie_ids = [movie_idx_to_id_sampled[i] for i in sorted_idx]
     scores = [float(np.clip(user_pred[i], 0.5, 5.0)) for i in sorted_idx]
@@ -179,7 +197,6 @@ def render_movie_cards(df: pd.DataFrame, score_col: str | None = None):
                 if score_col and score_col in row and not pd.isna(row[score_col]):
                     st.markdown(f"**Score:** {row[score_col]:.3f}")
             with col2:
-                # Placeholder thumbnail (you can replace with TMDB poster later)
                 st.image(
                     "https://via.placeholder.com/150x220.png?text=Movie",
                     use_container_width=True,
@@ -230,7 +247,6 @@ tab1, tab2 = st.tabs(["🔍 Get Recommendations", "📊 Dataset & Model Overview
 with tab1:
     st.subheader("Get Movie Recommendations")
 
-    # Movie selector
     movie_titles = movies_df["title"].tolist()
     selected_movie_title = st.selectbox(
         "Select a reference movie (for content-based & hybrid):",
@@ -239,17 +255,14 @@ with tab1:
     )
     selected_movie_id = movies_df.loc[movies_df["title"] == selected_movie_title, "movieId"].iloc[0]
 
-    # User selector
     sample_users = sorted(list(user_id_map_sampled.keys()))[:1000]
     selected_user_id = st.selectbox(
         "Select a user (for CF & hybrid):",
         options=sample_users,
     )
 
-    # Number of recommendations
     top_n = st.slider("Number of recommendations", min_value=5, max_value=30, value=10, step=1)
 
-    # Alpha for hybrid
     alpha = st.slider(
         "Content vs CF weight (Hybrid only)",
         min_value=0.0,
