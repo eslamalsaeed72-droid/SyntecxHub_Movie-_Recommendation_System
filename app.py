@@ -301,3 +301,4 @@ with tab2:
     st.markdown("---")
     st.markdown("##### Random Sample of Movies")
     st.dataframe(movies_df.sample(20).reset_index(drop=True))
+
