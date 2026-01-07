@@ -1,4 +1,4 @@
-# app.py
+# app.py (FIXED VERSION)
 # =============================================================================
 # Streamlit App: Hybrid Movie Recommendation System (MovieLens 25M)
 # Uses pre-trained models stored in ./models
@@ -23,7 +23,6 @@ st.set_page_config(
     layout="wide",
 )
 
-# Folder that contains the trained models and artifacts
 ARTIFACT_DIR = "./models"
 
 # -----------------------------------------------------------------------------
@@ -34,15 +33,12 @@ ARTIFACT_DIR = "./models"
 def load_artifacts():
     files = os.listdir(ARTIFACT_DIR)
 
-    # Detect correct files based on prefix (works مع الأسامي
-    # index_mappings_20260107_185445.json, ... إلخ)
     tfidf_file = sorted([f for f in files if "tfidf_vectorizer" in f])[0]
     user_factors_file = sorted([f for f in files if "user_factors" in f])[0]
     movie_factors_file = sorted([f for f in files if "movie_factors" in f])[0]
     mappings_file = sorted([f for f in files if "index_mappings" in f])[0]
     movies_meta_file = sorted([f for f in files if "movies_metadata" in f])[0]
 
-    # model_stats قد لا يكون موجود
     stats_files = sorted([f for f in files if "model_stats" in f and f.endswith(".json")])
     has_stats = len(stats_files) > 0
 
@@ -58,7 +54,6 @@ def load_artifacts():
         with open(os.path.join(ARTIFACT_DIR, stats_files[0]), "r") as f:
             stats = json.load(f)
     else:
-        # Fallback stats if not saved from training
         stats = {
             "n_users_total": len(mappings["user_id_map_sampled"]),
             "n_movies_total": len(mappings["movie_idx_to_id_sampled"]),
@@ -70,7 +65,6 @@ def load_artifacts():
             "k_eval": 10,
         }
 
-    # Convert mappings back to proper types
     user_id_map_sampled = {int(k): int(v) for k, v in mappings["user_id_map_sampled"].items()}
     movie_idx_to_id_sampled = {int(k): int(v) for k, v in mappings["movie_idx_to_id_sampled"].items()}
     movie_id_to_idx_sampled = {v: k for k, v in movie_idx_to_id_sampled.items()}
@@ -97,20 +91,12 @@ def load_artifacts():
     stats,
 ) = load_artifacts()
 
-# -----------------------------------------------------------------------------
-# BUILD TF-IDF MATRIX FROM SAVED VECTORIZER + MOVIES METADATA
-# -----------------------------------------------------------------------------
-
-@st.cache_resource(show_spinner=True)
-def build_tfidf_matrix(movies_df, tfidf_vectorizer):
-    combined = (
-        movies_df["title"].fillna("") + " " +
-        movies_df["genres"].fillna("").str.replace("|", " ")
-    )
-    tfidf_matrix = tfidf_vectorizer.transform(combined)
-    return tfidf_matrix
-
-tfidf_matrix = build_tfidf_matrix(movies_df, tfidf_vectorizer)
+# Build TF-IDF matrix (NO caching of unhashable objects)
+combined_text = (
+    movies_df["title"].fillna("") + " " +
+    movies_df["genres"].fillna("").str.replace("|", " ")
+)
+tfidf_matrix = tfidf_vectorizer.transform(combined_text)
 
 # -----------------------------------------------------------------------------
 # HELPER FUNCTIONS
