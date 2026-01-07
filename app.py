@@ -22,8 +22,9 @@ st.set_page_config(
     layout="wide",
 )
 
-# Path where artifacts are stored (change if needed)
-ARTIFACT_DIR = "./movie_recommender_artifacts"
+# Path where trained models and artifacts are stored
+ARTIFACT_DIR = "./models"
+
 
 # -----------------------------------------------------------------------------
 # LOAD ARTIFACTS
